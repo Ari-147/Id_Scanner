@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        window.FontAwesomeConfig = {
+          autoReplaceSvg: 'nest'
+        };
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/js/all.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ID Card Scanner - Claymorphism Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            color: #f8fafc;
+            overflow-x: hidden;
+        }
+
+        /* Ambient background glow */
+        .blob {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(90px);
+            pointer-events: none;
+            z-index: 0;
+        }
+        .blob-1 {
+            width: 450px; height: 450px;
+            background: rgba(16, 185, 129, 0.15);
+            top: -100px; left: -100px;
+        }
+        .blob-2 {
+            width: 400px; height: 400px;
+            background: rgba(99, 102, 241, 0.12);
+            bottom: -80px; right: -80px;
+        }
+
+        /* Claymorphic Containers */
+        .clay-card {
+            background: rgba(30, 41, 59, 0.7);
+            border-radius: 28px;
+            box-shadow: 14px 14px 30px rgba(4, 6, 15, 0.6),
+                        -8px -8px 24px rgba(255, 255, 255, 0.03),
+                        inset 2px 2px 6px rgba(255, 255, 255, 0.08),
+                        inset -2px -2px 6px rgba(0, 0, 0, 0.4);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(16px);
+        }
+
+        .clay-card-inner {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 20px;
+            box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.4),
+                        inset -4px -4px 8px rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        .clay-pill {
+            background: rgba(30, 41, 59, 0.8);
+            border-radius: 16px;
+            box-shadow: 6px 6px 12px rgba(4, 6, 15, 0.4),
+                        -4px -4px 10px rgba(255, 255, 255, 0.02),
+                        inset 1px 1px 3px rgba(255, 255, 255, 0.08);
+        }
+
+        /* Buttons with Clay Depth */
+        .btn-clay-primary {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            border-radius: 18px;
+            box-shadow: 8px 8px 20px rgba(5, 150, 105, 0.3),
+                        -4px -4px 12px rgba(255, 255, 255, 0.1),
+                        inset 2px 2px 4px rgba(255, 255, 255, 0.3),
+                        inset -2px -2px 4px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s ease;
+        }
+        .btn-clay-primary:hover {
+            background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+            transform: translateY(-1px);
+        }
+        .btn-clay-primary:active {
+            box-shadow: inset 4px 4px 8px rgba(0, 0, 0, 0.4);
+            transform: translateY(0);
+        }
+        .btn-clay-primary:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-clay-glass {
+            background: rgba(30, 41, 59, 0.6);
+            border-radius: 16px;
+            box-shadow: 6px 6px 14px rgba(4, 6, 15, 0.4),
+                        -4px -4px 10px rgba(255, 255, 255, 0.02),
+                        inset 1px 1px 3px rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.2s ease;
+        }
+        .btn-clay-glass:hover {
+            background: rgba(51, 65, 85, 0.8);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        /* Camera Viewport */
+        #camera-container {
+            position: relative;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 20px;
+            overflow: hidden;
+            box-shadow: inset 6px 6px 12px rgba(0, 0, 0, 0.8),
+                        inset -6px -6px 12px rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        #canvas { display: none; }
+
+        /* Scan corners */
+        .scan-frame {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+        }
+        .corner {
+            position: absolute;
+            width: 28px;
+            height: 28px;
+            border-color: #10b981;
+            border-style: solid;
+        }
+        .corner-tl { top: 20px; left: 20px; border-width: 3px 0 0 3px; border-radius: 6px 0 0 0; }
+        .corner-tr { top: 20px; right: 20px; border-width: 3px 3px 0 0; border-radius: 0 6px 0 0; }
+        .corner-bl { bottom: 20px; left: 20px; border-width: 0 0 3px 3px; border-radius: 0 0 0 6px; }
+        .corner-br { bottom: 20px; right: 20px; border-width: 0 3px 3px 0; border-radius: 0 0 6px 0; }
+
+        /* Scan line animation */
+        .scan-line {
+            position: absolute;
+            left: 20px;
+            right: 20px;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, #10b981, transparent);
+            box-shadow: 0 0 10px rgba(16, 185, 129, 0.9);
+            animation: scanMove 3s ease-in-out infinite;
+            opacity: 0;
+        }
+        .scanning .scan-line { opacity: 1; }
+        @keyframes scanMove {
+            0% { top: 20px; }
+            50% { top: calc(100% - 22px); }
+            100% { top: 20px; }
+        }
+
+        /* Field Row styling */
+        .field-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.4);
+            box-shadow: inset 2px 2px 4px rgba(0, 0, 0, 0.3),
+                        inset -2px -2px 4px rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            transition: border-color 0.2s;
+        }
+        .field-row:hover { border-color: rgba(16, 185, 129, 0.3); }
+        .field-icon {
+            width: 38px; height: 38px;
+            border-radius: 12px;
+            background: rgba(16, 185, 129, 0.15);
+            display: flex; align-items: center; justify-content: center;
+            color: #10b981;
+            flex-shrink: 0;
+            font-size: 14px;
+            box-shadow: 3px 3px 6px rgba(0,0,0,0.3), inset 1px 1px 2px rgba(255,255,255,0.2);
+        }
+        .field-label { color: rgba(255, 255, 255, 0.4); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+        .field-value { color: rgba(255, 255, 255, 0.9); font-size: 14px; font-weight: 500; }
+        .field-value.empty { color: rgba(255, 255, 255, 0.25); font-style: italic; font-weight: 400; }
+
+        /* Tabs */
+        .tab-btn.active {
+            background: rgba(16, 185, 129, 0.2);
+            border-color: rgba(16, 185, 129, 0.4);
+            color: #34d399;
+            box-shadow: inset 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        /* Upload Drop Zone */
+        #drop-zone {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 20px;
+            transition: all 0.2s;
+        }
+        #drop-zone:hover, #drop-zone.drag-over {
+            border-color: rgba(16, 185, 129, 0.6);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 4px; }
+    </style>
+</head>
+<body class="text-slate-100">
+
+  <!-- Ambient background blobs -->
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+
+  <div class="relative z-10 min-h-screen flex flex-col">
+
+    <!-- ─── TOP NAV ─── -->
+    <header class="clay-card mx-5 mt-4 px-6 py-3.5 flex items-center justify-between sticky top-4 z-50">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-2xl btn-clay-primary flex items-center justify-center">
+          <i class="fa-solid fa-id-card text-white text-base"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold text-white tracking-tight">IDScan<span class="text-emerald-400">Pro</span></h1>
+          <p class="text-xs text-slate-400 leading-none">Claymorphic Identity Engine</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2 px-3.5 py-1.5 rounded-full clay-pill text-xs text-slate-300">
+          <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+          <span>System Ready</span>
+        </div>
+        <button class="btn-clay-glass w-10 h-10 flex items-center justify-center text-slate-400 hover:text-white">
+          <i class="fa-solid fa-gear text-sm"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- ─── MAIN CONTENT ─── -->
+    <main class="flex-1 flex flex-col lg:flex-row gap-6 p-5 max-w-7xl mx-auto w-full">
+
+      <!-- LEFT PANEL — Camera, Upload, Guidelines & Raw Response Data -->
+      <div class="flex flex-col gap-5 lg:w-[50%]">
+
+        <!-- Mode Tabs -->
+        <div class="clay-card p-2 flex gap-2">
+          <button onclick="switchTab('camera')" id="tab-camera" class="tab-btn active flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium border border-transparent transition-all">
+            <i class="fa-solid fa-camera"></i> Live Camera
+          </button>
+          <button onclick="switchTab('upload')" id="tab-upload" class="tab-btn flex-1 flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-medium border border-transparent text-slate-400 transition-all">
+            <i class="fa-solid fa-upload"></i> Upload Image
+          </button>
+        </div>
+
+        <!-- Camera Panel -->
+        <div id="panel-camera" class="clay-card p-5 flex flex-col gap-4">
+          <div id="camera-container" class="h-[320px] sm:h-[360px]">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+
+            <div id="camera-idle" class="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-slate-950/70">
+              <div class="w-16 h-16 rounded-2xl clay-card flex items-center justify-center">
+                <i class="fa-solid fa-camera text-slate-500 text-2xl"></i>
+              </div>
+              <p class="text-sm text-slate-400 font-medium">Camera preview initializing...</p>
+              <p class="text-xs text-slate-500">Position ID card inside alignment frame</p>
+            </div>
+
+            <div class="scan-frame" id="scan-overlay" style="display:none">
+              <div class="corner corner-tl"></div>
+              <div class="corner corner-tr"></div>
+              <div class="corner corner-bl"></div>
+              <div class="corner corner-br"></div>
+              <div class="scan-line"></div>
+              <div class="absolute bottom-4 left-1/2 -translate-x-1/2 clay-pill px-4 py-1.5 text-xs text-emerald-400 flex items-center gap-2">
+                <i class="fa-solid fa-spinner fa-spin text-xs"></i> Processing Data...
+              </div>
+            </div>
+
+            <div class="absolute bottom-0 left-0 right-0 h-[3px] bg-slate-800">
+              <div id="progress-bar" class="h-full bg-gradient-to-r from-emerald-500 to-teal-400 transition-all duration-300 w-0"></div>
+            </div>
+          </div>
+
+          <!-- Controls -->
+          <div class="flex gap-3">
+            <button id="btn-capture" onclick="captureAndScan()" class="btn-clay-primary flex-1 flex items-center justify-center gap-2.5 py-3.5 font-semibold text-sm text-white">
+              <i class="fa-solid fa-camera-rotate"></i>
+              Capture &amp; Scan
+            </button>
+            <button id="btn-flash" onclick="toggleFlash()" class="btn-clay-glass w-12 h-12 flex items-center justify-center text-slate-400 hover:text-yellow-400" title="Toggle Flash">
+              <i class="fa-solid fa-bolt text-sm"></i>
+            </button>
+            <button id="btn-flip" onclick="flipCamera()" class="btn-clay-glass w-12 h-12 flex items-center justify-center text-slate-400 hover:text-white" title="Flip Camera">
+              <i class="fa-solid fa-rotate text-sm"></i>
+            </button>
+          </div>
+
+          <!-- Status Bar -->
+          <div id="status-bar" class="hidden rounded-2xl px-4 py-3 flex items-center gap-3 text-sm clay-card-inner">
+            <i id="status-icon" class="fa-solid fa-circle-xmark text-red-400"></i>
+            <span id="status-msg" class="text-slate-300"></span>
+          </div>
+        </div>
+
+        <!-- Upload Panel -->
+        <div id="panel-upload" class="hidden clay-card p-5 flex flex-col gap-4">
+          <div id="drop-zone" onclick="document.getElementById('file-input').click()" class="h-[280px] flex flex-col items-center justify-center gap-4 cursor-pointer">
+            <div class="w-16 h-16 rounded-2xl clay-card flex items-center justify-center">
+              <i class="fa-solid fa-file-image text-slate-400 text-2xl"></i>
+            </div>
+            <div class="text-center">
+              <p class="text-sm text-slate-300 font-medium">Drop your ID image here</p>
+              <p class="text-xs text-slate-500 mt-1">Supports PNG, JPG, WEBP</p>
+            </div>
+            <div class="btn-clay-glass px-4 py-2 text-xs text-slate-300 flex items-center gap-2">
+              <i class="fa-solid fa-folder-open"></i> Browse Files
+            </div>
+          </div>
+          <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleFileUpload(event)" />
+          <button id="btn-upload-scan" onclick="scanUploadedImage()" class="btn-clay-primary flex items-center justify-center gap-2.5 py-3.5 font-semibold text-sm text-white">
+            <i class="fa-solid fa-magnifying-glass"></i> Analyse Image
+          </button>
+        </div>
+
+        <!-- Tip Card: Scanning Guidelines -->
+        <div class="clay-card p-4 flex items-start gap-3.5">
+          <div class="w-8 h-8 rounded-xl bg-indigo-500/20 flex items-center justify-center flex-shrink-0 mt-0.5 text-indigo-400 shadow-inner">
+            <i class="fa-solid fa-lightbulb text-xs"></i>
+          </div>
+          <div>
+            <p class="text-xs font-semibold text-slate-300 mb-1">Scanning Guidelines</p>
+            <p class="text-xs text-slate-400 leading-relaxed">Keep your ID card flat in a well-lit area inside the frame boundaries to optimize extraction accuracy.</p>
+          </div>
+        </div>
+
+        <!-- Raw Data Section (Moved to Left Panel & Vertical Height Increased) -->
+        <div class="clay-card p-5 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2.5">
+              <div class="w-7 h-7 rounded-xl bg-slate-700/50 flex items-center justify-center text-slate-300 shadow-inner">
+                <i class="fa-solid fa-code text-xs"></i>
+              </div>
+              <span class="text-xs text-slate-300 font-semibold uppercase tracking-wider">Raw Response Data</span>
+            </div>
+            <button onclick="copyRawData()" class="text-xs text-slate-400 hover:text-emerald-400 transition-colors flex items-center gap-1">
+              <i class="fa-regular fa-copy"></i> Copy Raw
+            </button>
+          </div>
+          <div class="clay-card-inner p-4 rounded-xl font-mono text-xs text-emerald-300/90 overflow-y-auto max-h-[320px] min-h-[180px]">
+            <pre id="raw-data-output">{
+  "status": "idle",
+  "data": null
+}</pre>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT PANEL — Extracted Data & Scan Confidence -->
+      <div class="flex flex-col gap-5 lg:flex-1">
+
+        <!-- Prominent & Upgraded Scan Confidence Panel -->
+        <div class="clay-card p-5 flex flex-col gap-3.5 border border-emerald-500/20 shadow-lg relative overflow-hidden">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-inner">
+                <i class="fa-solid fa-gauge-high text-base"></i>
+              </div>
+              <div>
+                <h3 class="text-xs text-slate-400 font-bold uppercase tracking-wider">Scan Confidence</h3>
+                <p id="confidence-status" class="text-xs text-slate-500 font-medium">Awaiting analysis</p>
+              </div>
+            </div>
+            <div class="text-right">
+              <span id="confidence-pct" class="text-3xl font-extrabold text-emerald-400 tracking-tight">—</span>
+            </div>
+          </div>
+          
+          <!-- Thicker & glowing progress bar -->
+          <div class="w-full h-4 bg-slate-900/90 rounded-full overflow-hidden shadow-inner p-0.5 border border-slate-800">
+            <div id="confidence-bar" class="h-full rounded-full bg-gradient-to-r from-teal-500 via-emerald-400 to-green-300 transition-all duration-700 shadow-[0_0_12px_rgba(16,185,129,0.5)]" style="width:0%"></div>
+          </div>
+        </div>
+
+        <!-- Results Header & Extracted Data -->
+        <div class="clay-card p-5">
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 shadow-inner">
+                <i class="fa-solid fa-user-check text-sm"></i>
+              </div>
+              <div>
+                <h2 class="text-sm font-semibold text-slate-200">Extracted Data</h2>
+                <p class="text-xs text-slate-400">Structured scan breakdown</p>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="copyAllData()" class="btn-clay-glass px-3 py-1.5 text-xs text-slate-300 hover:text-white flex items-center gap-1.5">
+                <i class="fa-regular fa-copy text-xs"></i> Copy All
+              </button>
+              <button onclick="clearData()" class="btn-clay-glass px-3 py-1.5 text-xs text-slate-300 hover:text-red-400 flex items-center gap-1.5">
+                <i class="fa-solid fa-trash text-xs"></i> Clear
+              </button>
+            </div>
+          </div>
+
+          <!-- Hero Identity Card (Photo option removed) -->
+          <div class="flex items-center justify-between p-4 clay-card-inner mb-4">
+            <div class="flex-1 min-w-0">
+              <p class="text-xs font-semibold text-emerald-400/80 uppercase tracking-wider mb-0.5">Scanned Subject</p>
+              <p class="text-lg font-bold text-slate-100 truncate" id="disp-name">—</p>
+              <p class="text-xs text-slate-400 mt-0.5 font-mono" id="disp-id-number">ID: —</p>
+            </div>
+            <div class="flex-shrink-0 ml-3">
+              <span id="verif-badge" class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full clay-pill text-xs font-medium text-slate-400">
+                <i class="fa-regular fa-circle-dot text-[10px]"></i> Awaiting scan
+              </span>
+            </div>
+          </div>
+
+          <!-- Data Fields List -->
+          <div class="flex flex-col gap-2.5" id="fields-list">
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-user"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Full Name</p>
+                <p class="field-value empty" id="field-name">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-name')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-venus-mars"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Gender</p>
+                <p class="field-value empty" id="field-gender">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-gender')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-cake-candles"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Date of Birth</p>
+                <p class="field-value empty" id="field-dob">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-dob')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-hashtag"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">ID Number</p>
+                <p class="field-value empty font-mono" id="field-id">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-id')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-location-dot"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Address</p>
+                <p class="field-value empty" id="field-address">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-address')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-building-user"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Organization</p>
+                <p class="field-value empty" id="field-organization">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-organization')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+
+            <div class="field-row">
+              <div class="field-icon"><i class="fa-solid fa-calendar-check"></i></div>
+              <div class="flex-1 min-w-0">
+                <p class="field-label">Expiry Date</p>
+                <p class="field-value empty" id="field-expiry">Not scanned yet</p>
+              </div>
+              <button onclick="copyField('field-expiry')" class="text-slate-500 hover:text-emerald-400 transition-colors ml-2">
+                <i class="fa-regular fa-copy text-xs"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-[100] clay-card px-5 py-3 text-sm text-slate-100 flex items-center gap-3 opacity-0 pointer-events-none transition-all duration-300 shadow-2xl">
+    <i id="toast-icon" class="fa-solid fa-check-circle text-emerald-400"></i>
+    <span id="toast-msg"></span>
+  </div>
+
+  <script>
+    // ── State ──────────────────────────────────────────────────────────────────
+    let stream = null;
+    let facingMode = 'environment';
+    let flashOn = false;
+    let uploadedImage = null;
+    let scannedData = {};
+    const currentTab = { val: 'camera' };
+    let progressInterval;
+
+    // ── Tab switching ──────────────────────────────────────────────────────────
+    function switchTab(tab) {
+      currentTab.val = tab;
+      document.getElementById('panel-camera').classList.toggle('hidden', tab !== 'camera');
+      document.getElementById('panel-upload').classList.toggle('hidden', tab !== 'upload');
+      document.getElementById('tab-camera').classList.toggle('active', tab === 'camera');
+      document.getElementById('tab-upload').classList.toggle('active', tab === 'upload');
+      if (tab === 'camera') initCamera();
+    }
+
+    // ── Camera ─────────────────────────────────────────────────────────────────
+    async function initCamera() {
+      try {
+        if (stream) { stream.getTracks().forEach(t => t.stop()); }
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: facingMode }, width: { ideal: 3840 }, height: { ideal: 2160 }, advanced: [{ focusMode: 'continuous' }] }
+        });
+        const video = document.getElementById('video');
+        video.srcObject = stream;
+        document.getElementById('camera-idle').style.display = 'none';
+        hideStatus();
+      } catch (e) {
+        showStatus('error', 'Camera access denied or unavailable. Please check permissions.');
+      }
+    }
+
+    function flipCamera() {
+      facingMode = facingMode === 'environment' ? 'user' : 'environment';
+      initCamera();
+      showToast('Camera flipped', 'info');
+    }
+
+    function toggleFlash() {
+      flashOn = !flashOn;
+      const btn = document.getElementById('btn-flash');
+      btn.classList.toggle('text-yellow-400', flashOn);
+      btn.classList.toggle('text-slate-400', !flashOn);
+      if (stream) {
+        const track = stream.getVideoTracks()[0];
+        if (track && track.getCapabilities && track.getCapabilities().torch) {
+          track.applyConstraints({ advanced: [{ torch: flashOn }] });
+        }
+      }
+      showToast(flashOn ? 'Flash on' : 'Flash off', 'info');
+    }
+
+    // ── Backend Integration (`/scan`) ──────────────────────────────────────────
+    async function sendImage(blob, name) {
+      startScanAnimation();
+      const fd = new FormData();
+      fd.append('file', blob, name);
+      try {
+        const res = await fetch('/scan', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        
+        stopScanAnimation();
+        populateFieldsFromBackend(data);
+      } catch (e) {
+        stopScanAnimation();
+        showStatus('error', 'Analysis failed: ' + e.message);
+        showToast('Server connection error', 'error');
+      }
+    }
+
+    // ── Capture & Scan Logic ───────────────────────────────────────────────────
+    async function captureAndScan() {
+      if (!stream && currentTab.val === 'camera') {
+        showStatus('error', 'No camera stream. Please allow camera access first.');
+        initCamera();
+        return;
+      }
+      const video = document.getElementById('video');
+      const canvas = document.getElementById('canvas');
+      
+      if (!video.videoWidth) { 
+        showStatus('error', 'Camera not ready…'); 
+        return; 
+      }
+      
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      canvas.getContext('2d').drawImage(video, 0, 0);
+
+      const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.95));
+      sendImage(blob, 'card.jpg');
+    }
+
+    function startScanAnimation() {
+      const overlay = document.getElementById('scan-overlay');
+      const container = document.getElementById('camera-container');
+      overlay.style.display = 'block';
+      container.classList.add('scanning');
+      
+      const captureBtn = document.getElementById('btn-capture');
+      captureBtn.disabled = true;
+      captureBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing…';
+      
+      const uploadBtn = document.getElementById('btn-upload-scan');
+      uploadBtn.disabled = true;
+      uploadBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Analyzing…';
+
+      // Start looping progress bar
+      let w = 0;
+      const bar = document.getElementById('progress-bar');
+      progressInterval = setInterval(() => {
+        w += Math.random() * 10;
+        if (w >= 90) w = 90; // Hold at 90% until backend responds
+        bar.style.width = w + '%';
+      }, 200);
+    }
+
+    function stopScanAnimation() {
+      clearInterval(progressInterval);
+      const bar = document.getElementById('progress-bar');
+      bar.style.width = '100%';
+      
+      setTimeout(() => {
+        const overlay = document.getElementById('scan-overlay');
+        const container = document.getElementById('camera-container');
+        overlay.style.display = 'none';
+        container.classList.remove('scanning');
+        bar.style.width = '0%';
+        
+        const captureBtn = document.getElementById('btn-capture');
+        captureBtn.disabled = false;
+        captureBtn.innerHTML = '<i class="fa-solid fa-camera-rotate"></i> Capture &amp; Scan';
+        
+        const uploadBtn = document.getElementById('btn-upload-scan');
+        uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Analyse Image';
+      }, 300);
+    }
+
+    // ── File Upload Logic ──────────────────────────────────────────────────────
+    function handleFileUpload(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      uploadedImage = file;
+      const dz = document.getElementById('drop-zone');
+      dz.innerHTML = `
+        <div class="w-12 h-12 rounded-xl clay-card flex items-center justify-center">
+          <i class="fa-solid fa-file-image text-emerald-400 text-xl"></i>
+        </div>
+        <p class="text-sm text-slate-200 font-medium">${file.name}</p>
+        <p class="text-xs text-slate-400">${(file.size/1024).toFixed(1)} KB — ready to scan</p>
+      `;
+      showToast('Image loaded — click Analyse to scan', 'success');
+    }
+
+    const dz = document.getElementById('drop-zone');
+    dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+    dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+    dz.addEventListener('drop', e => {
+      e.preventDefault(); dz.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) { document.getElementById('file-input').files = e.dataTransfer.files; handleFileUpload({ target: { files: [file] } }); }
+    });
+
+    function scanUploadedImage() {
+      if (!uploadedImage) { showToast('Please upload an image first', 'error'); return; }
+      sendImage(uploadedImage, uploadedImage.name);
+    }
+
+    // ── Data Processing ────────────────────────────────────────────────────────
+    function getSafeValue(val) {
+        if (val === null || val === undefined || val === '') return '';
+        if (Array.isArray(val)) return val.length > 0 ? val.join(', ') : '';
+        return String(val);
+    }
+
+    function populateFieldsFromBackend(response) {
+      scannedData = response; 
+      const resultData = response.result || {};
+      const cardholder = resultData.cardholder || {};
+      const coverage = resultData.coverage || {};
+
+      const extracted = {
+        name: getSafeValue(cardholder.name),
+        gender: getSafeValue(cardholder.sex),
+        dob: getSafeValue(cardholder.dob),
+        id: getSafeValue(cardholder.id_number),
+        address: getSafeValue(cardholder.address),
+        organization: getSafeValue(coverage.organization),
+        expiry: getSafeValue(coverage.expiry),
+        confidence: resultData.confidence ? Math.round(resultData.confidence) : 0
+      };
+
+      populateFields(extracted);
+      
+      document.getElementById('raw-data-output').textContent = JSON.stringify(response, null, 2);
+      showToast('ID scanned successfully!', 'success');
+    }
+
+    function populateFields(data) {
+      const setField = (elementId, value) => {
+        const el = document.getElementById(elementId);
+        if (value) {
+            el.textContent = value;
+            el.classList.remove('empty');
+        } else {
+            el.textContent = '—';
+            el.classList.add('empty');
+        }
+      };
+
+      setField('field-name', data.name);
+      setField('field-gender', data.gender);
+      setField('field-dob', data.dob);
+      setField('field-id', data.id);
+      setField('field-address', data.address);
+      setField('field-organization', data.organization);
+      setField('field-expiry', data.expiry);
+
+      document.getElementById('disp-name').textContent = data.name || 'Unknown Subject';
+      document.getElementById('disp-id-number').textContent = 'ID: ' + (data.id || '—');
+
+      const badge = document.getElementById('verif-badge');
+      badge.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-xs font-semibold text-emerald-400';
+      badge.innerHTML = '<i class="fa-solid fa-circle-check text-[10px]"></i> Scanned';
+
+      // Confidence Bar Updates
+      const confidencePct = data.confidence || 0;
+      document.getElementById('confidence-pct').textContent = confidencePct + '%';
+      document.getElementById('confidence-bar').style.width = confidencePct + '%';
+      
+      const confStatus = document.getElementById('confidence-status');
+      if (confidencePct >= 80) {
+        confStatus.textContent = 'High extraction quality';
+        confStatus.className = 'text-xs text-emerald-400 font-medium';
+      } else if (confidencePct >= 50) {
+        confStatus.textContent = 'Moderate extraction quality';
+        confStatus.className = 'text-xs text-yellow-400 font-medium';
+      } else {
+        confStatus.textContent = 'Low extraction confidence';
+        confStatus.className = 'text-xs text-red-400 font-medium';
+      }
+    }
+
+    function clearData() {
+      const ids = ['field-name','field-gender','field-dob','field-id','field-address','field-organization','field-expiry'];
+      ids.forEach(id => {
+        const el = document.getElementById(id);
+        el.textContent = 'Not scanned yet';
+        el.classList.add('empty');
+      });
+      
+      document.getElementById('disp-name').textContent = '—';
+      document.getElementById('disp-id-number').textContent = 'ID: —';
+      
+      const badge = document.getElementById('verif-badge');
+      badge.className = 'inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full clay-pill text-xs font-medium text-slate-400';
+      badge.innerHTML = '<i class="fa-regular fa-circle-dot text-[10px]"></i> Awaiting scan';
+      
+      document.getElementById('confidence-pct').textContent = '—';
+      document.getElementById('confidence-bar').style.width = '0%';
+      document.getElementById('confidence-status').textContent = 'Awaiting analysis';
+      document.getElementById('confidence-status').className = 'text-xs text-slate-500 font-medium';
+
+      document.getElementById('raw-data-output').textContent = JSON.stringify({ "status": "idle", "data": null }, null, 2);
+      
+      scannedData = {};
+      showToast('Data cleared', 'info');
+    }
+
+    // ── Copy Helpers ───────────────────────────────────────────────────────────
+    function copyField(id) {
+      const text = document.getElementById(id).textContent;
+      if (text === 'Not scanned yet' || text === '—') { showToast('No data to copy', 'error'); return; }
+      navigator.clipboard.writeText(text).then(() => showToast('Copied!', 'success'));
+    }
+
+    function copyAllData() {
+      if (!scannedData.result) { showToast('No data to copy', 'error'); return; }
+      const textToCopy = JSON.stringify(scannedData.result, null, 2);
+      navigator.clipboard.writeText(textToCopy).then(() => showToast('Extracted JSON copied!', 'success'));
+    }
+
+    function copyRawData() {
+      const rawText = document.getElementById('raw-data-output').textContent;
+      if(rawText.includes('"status": "idle"')) { showToast('No raw data to copy', 'error'); return; }
+      navigator.clipboard.writeText(rawText).then(() => showToast('Raw JSON copied!', 'success'));
+    }
+
+    // ── Status & Toast ─────────────────────────────────────────────────────────
+    function showStatus(type, msg) {
+      const bar = document.getElementById('status-bar');
+      const icon = document.getElementById('status-icon');
+      const msgEl = document.getElementById('status-msg');
+      bar.classList.remove('hidden');
+      if (type === 'error') {
+        bar.className = 'rounded-2xl px-4 py-3 flex items-center gap-3 text-sm bg-red-500/10 border border-red-500/20 clay-card-inner';
+        icon.className = 'fa-solid fa-circle-xmark text-red-400';
+      } else {
+        bar.className = 'rounded-2xl px-4 py-3 flex items-center gap-3 text-sm bg-emerald-500/10 border border-emerald-500/20 clay-card-inner';
+        icon.className = 'fa-solid fa-circle-check text-emerald-400';
+      }
+      msgEl.textContent = msg;
+    }
+
+    function hideStatus() {
+      document.getElementById('status-bar').classList.add('hidden');
+    }
+
+    function showToast(msg, type = 'success') {
+      const toast = document.getElementById('toast');
+      const icon = document.getElementById('toast-icon');
+      const msgEl = document.getElementById('toast-msg');
+      msgEl.textContent = msg;
+      icon.className = type === 'error' ? 'fa-solid fa-circle-xmark text-red-400'
+                      : type === 'info'  ? 'fa-solid fa-circle-info text-blue-400'
+                      : 'fa-solid fa-circle-check text-emerald-400';
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateX(-50%) translateY(0)';
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(8px)';
+      }, 2500);
+    }
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+    window.addEventListener('load', () => {
+      initCamera();
+    });
+  </script>
+</body>
+</html>

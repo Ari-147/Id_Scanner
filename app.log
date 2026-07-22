@@ -1,0 +1,39 @@
+2026-07-21 19:07:17,807 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-21 19:07:17,976 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-21 19:08:35,214 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-21 19:08:35,220 [INFO] Kept 32 lines after confidence filter
+2026-07-21 19:08:35,228 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-21 19:08:35,268 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-21 19:08:35,269 [INFO] LLM refinement status: not_configured
+2026-07-21 19:08:35,278 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-21 19:32:24,617 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-21 19:34:01,757 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-21 19:34:01,761 [INFO] Kept 32 lines after confidence filter
+2026-07-21 19:34:01,768 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-21 19:34:01,832 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-21 19:34:01,833 [INFO] LLM refinement status: not_configured
+2026-07-21 19:34:01,835 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-21 21:25:16,946 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-21 21:33:42,865 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-21 21:33:43,378 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-21 21:36:09,648 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-21 21:36:09,663 [INFO] Kept 32 lines after confidence filter
+2026-07-21 21:36:09,763 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-21 21:36:09,881 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-21 21:36:09,887 [INFO] LLM refinement status: not_configured
+2026-07-21 21:36:09,913 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-21 21:44:49,808 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-21 21:45:50,323 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-21 21:45:50,326 [INFO] Kept 32 lines after confidence filter
+2026-07-21 21:45:50,337 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-21 21:45:50,368 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-21 21:45:50,369 [INFO] LLM refinement status: not_configured
+2026-07-21 21:45:50,369 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-22 18:46:06,257 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-22 18:46:09,399 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-22 18:47:50,573 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-22 18:47:50,578 [INFO] Kept 32 lines after confidence filter
+2026-07-22 18:47:50,597 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-22 18:47:50,663 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-22 18:47:50,663 [INFO] LLM refinement status: not_configured
+2026-07-22 18:47:50,673 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg

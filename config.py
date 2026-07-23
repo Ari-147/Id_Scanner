@@ -15,19 +15,29 @@ import os
 # behaves exactly as it does with no API key at all.
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-# Fast/cheap model — the refinement step is a small text-sorting task, not OCR.
+# Fast/cheap model — also multimodal, so it can read a card/fax image directly.
 LLM_MODEL = "claude-haiku-4-5-20251001"
 
-# Small: enough for one compact JSON object back.
-LLM_MAX_TOKENS = 300
+# --- Output token budgets (kept intentionally small = token-friendly) -------
+# Different limits for the three call shapes; the image/fax calls get a bit more
+# headroom because vision answers tend to be slightly longer.
+LLM_MAX_TOKENS = 300              # ID refine, OCR text only
+LLM_IMAGE_MAX_TOKENS = 512        # ID refine, with the card image attached
+FAX_LLM_MAX_TOKENS = 1024         # fax from OCR text (fallback path)
+FAX_LLM_IMAGE_MAX_TOKENS = 1536   # fax sent as image(s) to Claude vision
 
-# A fax has many more fields than an ID card, so its JSON response needs a
-# larger (but still bounded) token budget. See fax_llm.py.
-FAX_LLM_MAX_TOKENS = 1024
+# --- Input token control for vision calls -----------------------------------
+# Downscale an image's long edge to at most this many px before sending. Image
+# input tokens scale with pixel area (~w*h/750), so this is the main knob for
+# keeping vision calls cheap. Fax text is large, so 1300px stays very legible.
+LLM_IMAGE_MAX_DIM = 1300
+# Safety cap on how many fax pages we send to the vision model in one call.
+FAX_LLM_MAX_PAGES = 10
 
 # Refinement trigger: call the LLM only when the heuristic parse left more than
 # this many unclassified lines in extra_fields (in addition to the missing
-# name / id_number checks). Keeps token usage near-zero on clean scans.
+# name / id_number checks). Keeps token usage near-zero on clean scans. When it
+# does fire, the card image is attached (same threshold gates the image send).
 REFINE_MAX_EXTRA_FIELDS = 2
 
 # ---------------------------------------------------------------------------

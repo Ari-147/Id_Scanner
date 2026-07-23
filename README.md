@@ -1,8 +1,13 @@
-# ID Card Scanner
+# ID Card Scanner & Fax Extractor
 
 A lightweight FastAPI backend + single-file HTML/JS frontend that scans ID / insurance cards
 through a device camera (or an uploaded photo), runs OCR, extracts structured fields with dynamic
 heuristics, and cross-references the text against a payer database for an instant `payer_id` lookup.
+
+It also parses **medical referral faxes** (image or PDF) into a structured field set via two
+interchangeable engines: a fast, layout-aware **regex/geometry** parser and a **Claude vision**
+parser that reads the fax image directly (including its order-type checkboxes). See
+[Fax parsing](#fax-parsing-medical-referral-faxes).
 
 ## Features
 
@@ -10,7 +15,7 @@ heuristics, and cross-references the text against a payer database for an instan
   preprocessed (grayscale → upscale small captures → CLAHE contrast), then read with
   [`easyocr`](https://github.com/JaidedAI/EasyOCR) (CPU mode).
 - **Confidence filtering** — each OCR detection carries a confidence; anything below `min_conf`
-  (default `0.4`, tunable per request) is set aside in `dropped_low_confidence` instead of
+  (default `0.35`, tunable per request) is set aside in `dropped_low_confidence` instead of
   polluting the parsed fields.
 - **3-tier heuristic parser** for varying card layouts:
   1. **Fuzzy label match** — matches known labels (`Name`, `DOB`, `Member ID`, …) on the same line
@@ -25,12 +30,20 @@ heuristics, and cross-references the text against a payer database for an instan
 - **ID normalization** — alphabetic characters in ID numbers are uppercased (OCR often lowercases,
   e.g. `Y`→`y`).
 - **Strict payer lookup** — see [Payer matching](#payer-matching-behavior) below.
-- **Optional Claude refinement** — an *additive*, off-by-default step that asks a fast Claude model
-  to double-check the field assignment when the heuristic parse looks incomplete. Strictly token-
-  disciplined and fully graceful — see [LLM refinement](#optional-llm-refinement) below.
+- **Optional Claude refinement (now vision-capable)** — an *additive*, off-by-default step that asks
+  a fast Claude model to double-check the field assignment when the heuristic parse looks incomplete.
+  When it fires, the **card image is attached** so Claude can read the card directly instead of
+  trusting shaky OCR. Strictly token-disciplined and fully graceful — see
+  [LLM refinement](#optional-llm-refinement) below.
+- **Fax parsing** — two endpoints turn a medical referral fax (image **or PDF**) into the same
+  structured JSON: `/extract-data-v1` (regex + geometry, zero-cost) and `/extract-data-v2`
+  (Claude vision). See [Fax parsing](#fax-parsing-medical-referral-faxes).
+- **Fast startup** — the EasyOCR model is preloaded once at server boot and constructed without the
+  per-start download/verify handshake, so the first request isn't slow. See
+  [OCR startup & performance](#ocr-startup--performance).
 - **Single-file frontend** — Tailwind CSS, HTML5 `getUserMedia` (back camera, high resolution),
-  live preview, capture button, camera-flip, **image-upload fallback**, and on-screen JSON with a
-  payer-match banner.
+  live preview, capture button, camera-flip, **image-upload fallback**, a **Fax Document** tab
+  (PDF/image upload + engine selector), and on-screen JSON with a payer-match banner.
 
 ## Payer matching behavior
 
@@ -130,10 +143,11 @@ caption.
 
 ## Optional LLM refinement
 
-After the heuristic parser and payer lookup run, the app can optionally ask a fast Claude model
-(`claude-haiku-4-5-20251001`) to **double-check and correct the field assignment**. This is a pure
-*text-sorting* task on the small set of OCR lines already extracted — **it is not a second OCR pass
-and the image is never sent to the model.**
+After the heuristic parser and payer lookup run, the app can optionally ask a fast, multimodal Claude
+model (`claude-haiku-4-5-20251001`) to **double-check and correct the field assignment**. When it
+fires, the **card image is attached** so Claude can read the card directly — this is the recovery
+path for exactly the scans where OCR did poorly, so seeing the pixels (not just the shaky text) is
+what makes the correction reliable.
 
 **Off by default.** It runs only if `ANTHROPIC_API_KEY` is set in the environment. With no key, the
 app behaves exactly as it always has (the `.env.example` shows the only new setting).
@@ -149,9 +163,12 @@ called when the heuristic parse looks incomplete or ambiguous:
 Otherwise the heuristic result is returned as-is with **no API call**. A clean card therefore costs
 zero tokens.
 
-**What gets sent (kept minimal):** only the confident OCR `raw_lines` (typically < 20 short lines)
-and the parser's current best-guess `fields` (as compact JSON). The image, the payer database,
-`dropped_low_confidence` lines, and per-detection metadata (bbox / confidence) are **never** sent.
+**What gets sent (kept minimal):** the confident OCR `raw_lines` (typically < 20 short lines), the
+parser's current best-guess `fields` (as compact JSON), and the **card image** — downscaled to a
+1300 px long edge and JPEG-encoded (`llm_image.py`), which is the main lever keeping the vision call
+cheap (≈ 1.3 k image tokens). The payer database, `dropped_low_confidence` lines, and per-detection
+metadata (bbox / confidence) are **never** sent. Output is capped separately per call shape
+(`LLM_MAX_TOKENS` for a text-only call, `LLM_IMAGE_MAX_TOKENS` when the image is attached).
 
 **Merge behavior:** results are merged field-by-field — an LLM value is used only where it actually
 filled something in, so a sparse response can never blank out a field the heuristic parser already
@@ -163,7 +180,8 @@ got right. Payer fields (`payer_id` / `payer_name` / `payer_match`) are preserve
 |-----------|----------|--------------------|
 | Heuristic parse already complete | API not called | `"skipped"` |
 | No `ANTHROPIC_API_KEY` set (or `anthropic` not installed) | Clean no-op | `"not_configured"` |
-| LLM ran and returned usable JSON | Merged into `fields` | `"applied"` |
+| LLM ran (image attached) and returned usable JSON | Merged into `fields` | `"applied_image"` |
+| LLM ran (text only) and returned usable JSON | Merged into `fields` | `"applied"` |
 | API error / timeout / no network / expired key / malformed JSON | Caught, warning logged, heuristic result returned unchanged | `"failed"` |
 
 Set the key via a standard environment variable (see `.env.example`):
@@ -174,36 +192,119 @@ export ANTHROPIC_API_KEY=sk-ant-...
 
 The `refinement` field is the **only** addition to the `/scan` response schema.
 
-## Project structure
+## Fax parsing (medical referral faxes)
+
+Two endpoints extract a **medical referral fax** into one flat, structured field set (fax metadata,
+organization, referring provider, patient, order-type checkboxes, and laboratory values). Both
+accept an **image or a PDF** (multi-page PDFs are rasterized per page via `pdf_converter.py`, which
+needs Poppler — see [Requirements](#requirements)) and return the **same response shape** so the
+frontend renders either identically:
+
+```json
+{ "method": "regex" | "claude", "fields": { ... }, "ocr_confidence": [ ... ] }
+```
+
+The canonical field list lives in one place, `fax_parser.py::FAX_FIELDS`, and is shared by both
+engines.
+
+### `/extract-data-v1` — regex + geometry (zero-cost baseline)
+
+Referral faxes are *forms*, not prose: a field's label sits on one line and its value in the box
+**directly below** it, and lab results are a **two-column grid**. A naive "Label: value" regex misses
+almost everything, so `fax_parser.py` is **layout-aware** and uses each OCR detection's normalized
+`x`/`y` position (now returned by `run_adaptive_ocr`):
+
+- a field's value is the detection(s) **directly below its label in the same x-column** — this is
+  what correctly pairs the two-column labs (e.g. `LDL → 91`, `HDL → 60`, `ESR → 56`, `CRP → 100`),
+  which a plain reading-order scan gets wrong;
+- fragments on the same row are merged left-to-right (e.g. a phone split by OCR into `+1` and
+  `7869899867` → `+17869899867`);
+- generic labels (`Email` / `Phone` / `Name`) are disambiguated by which form **section**
+  (Provider / Patient / Labs) their y-position falls in.
+
+> **Checkbox limitation (v1 only):** OCR captures the printed *text* of every order-type option but
+> not the checkbox tick, so v1 reports which options the form *lists*, not which are *selected*
+> (all listed options read `true`). Use `/extract-data-v2` for correct checkbox state.
+
+### `/extract-data-v2` — Claude vision
+
+Sends the fax page image(s) **directly to Claude** (no OCR step) so the model reads the form —
+including the **order-type checkboxes** — from the pixels. This resolves the v1 checkbox limitation
+and tends to recover details OCR mangles (accented/segmented phones and emails). Requires
+`ANTHROPIC_API_KEY`; returns `503` if unset.
+
+- **Token discipline:** each page is downscaled to a 1300 px long edge and JPEG-encoded
+  (`llm_image.py`); at most `FAX_LLM_MAX_PAGES` pages are sent; output is capped at
+  `FAX_LLM_IMAGE_MAX_TOKENS`.
+- The response adds `"source": "image"` and `"pages": N`, and `ocr_confidence` is `[]` (there is no
+  OCR pass). The frontend shows *"Read directly by Claude vision (N pages)"* in place of a
+  confidence percentage.
+
+### Fax UI
+
+The frontend adds a **Fax Document** tab (alongside Live Camera and Upload Image) with a drop zone
+for PDF/PNG/JPG and an **engine selector** (Regex v1 / Claude AI v2). Results render into grouped,
+fax-appropriate sections (Fax Metadata, Organization, Provider, Patient, Order Type, Lab Values,
+Support) rather than the ID-card layout.
+
+## OCR startup & performance
+
+EasyOCR runs on CPU and its model is loaded once per process. Two changes keep startup fast without
+changing OCR accuracy:
+
+- **Warm preload at boot** — a FastAPI `lifespan` handler calls `get_reader()` at startup, so the
+  model is ready before the first request instead of stalling it for several seconds.
+- **No per-start download/verify handshake** — when the weights already exist in
+  `EASYOCR_MODEL_DIR` (default `~/.EasyOCR/model`), the reader is built with `download_enabled=False`
+  and just loads the local files. A one-time download still happens automatically on first-ever
+  setup (or if the directory is empty). `easyocr` is pinned in `requirements.txt` so an upgrade can't
+  silently expect different model files and trigger a real re-download.
+- **Accuracy-neutral knobs** — `quantize=True` (EasyOCR's default CPU int8 speedup, made explicit)
+  and an optional `OCR_NUM_THREADS` cap for torch.
+
+DPI and the adaptive two-pass OCR logic are unchanged, so per-page OCR output is identical to before.
 
 ```
 Task_2_OCR/
-├── app.py             # FastAPI app setup, CORS, routes (/ , /health, /scan) — orchestration only
-├── config.py          # env vars + tunables in one place (incl. optional ANTHROPIC_API_KEY)
-├── ocr.py             # preprocessing + adaptive two-pass OCR + merge (run_adaptive_ocr)
-├── parser.py          # 3-tier dynamic heuristic parser (parse_fields)
+├── app.py             # FastAPI app + lifespan preload; routes: / /health /scan
+│                      #   /extract-data-v1 /extract-data-v2 — orchestration only
+├── config.py          # env vars + tunables (ANTHROPIC_API_KEY, model dir, token/image limits)
+├── ocr.py             # preprocessing + adaptive two-pass OCR + merge (run_adaptive_ocr, get_reader)
+├── parser.py          # 3-tier dynamic heuristic parser for ID cards (parse_fields)
 ├── payer_matching.py  # pre-indexed rapidfuzz payer lookup (match_payer)
-├── llm_refine.py      # optional Claude field-refinement step (needs_refinement / maybe_refine)
-├── index.html         # Camera stream + upload + result UI (served at /)
+├── llm_refine.py      # optional Claude ID-card refinement, incl. vision (needs_refinement / maybe_refine)
+├── fax_parser.py      # layout/geometry-aware regex fax parser (parser_fax_with_regex, FAX_FIELDS)
+├── fax_llm.py         # Claude-vision fax parser (parse_fax_with_llm)
+├── pdf_converter.py   # PDF → per-page images for faxes (needs Poppler)
+├── llm_image.py       # shared image → downscaled JPEG → Anthropic vision block
+├── index.html         # Camera + upload + Fax Document tabs + result UI (served at /)
 ├── payers_data.py     # PAYERS_DATA list (payer_name, payer_id, alt_names)
 ├── requirements.txt
-├── .env.example       # the ONE new optional setting (ANTHROPIC_API_KEY)
+├── .env.example       # optional ANTHROPIC_API_KEY (+ optional EASYOCR_MODEL_DIR / OCR_NUM_THREADS)
 ├── test_llm_refine.py # mocked tests for the refinement step (no key/network needed)
 └── README.md
 ```
 
-The scan pipeline (`app.py`) is now pure orchestration: `run_adaptive_ocr()` → `parse_fields()` →
-`match_payer()` → (optionally) `maybe_refine()`. Splitting into modules introduced **no behavior
-change** — `/scan` output on a given image is identical to before, plus one new `refinement` field.
+The scan pipeline (`app.py`) is pure orchestration: `run_adaptive_ocr()` → `parse_fields()` →
+`match_payer()` → (optionally) `maybe_refine()`. The fax pipeline is `run_adaptive_ocr()` (v1) or
+`convert_pdf_to_images()` (v2) → `parser_fax_with_regex()` / `parse_fax_with_llm()`. The `/scan`
+output on a given image is identical to before, plus the `refinement` field.
 
 ## Requirements
 
 - Python 3.10+
-- Packages: `fastapi`, `uvicorn`, `easyocr`, `rapidfuzz`, `opencv-python-headless`, `numpy`,
-  `python-multipart`, `pillow`, `anthropic` (see `requirements.txt`)
-- **`anthropic` is only used by the optional refinement step.** If you never set
-  `ANTHROPIC_API_KEY`, the package is still imported harmlessly (and even if it were missing, the
-  app degrades to a clean no-op) — the core OCR / parsing / payer pipeline has no new dependency.
+- Packages: `fastapi`, `uvicorn`, `easyocr` (pinned `==1.7.2`), `rapidfuzz`,
+  `opencv-python-headless`, `numpy`, `python-multipart`, `pillow`, `anthropic`, `pdf2image`
+  (see `requirements.txt`)
+- **Poppler** — required by `pdf2image` to rasterize PDF faxes. Install it and point
+  `pdf_converter.py::POPPLER_PATH` at its `bin` directory (Windows), or install
+  `poppler-utils` on Linux / `brew install poppler` on macOS. Only needed if you upload **PDF**
+  faxes; image faxes and the ID-card `/scan` path don't use it.
+- **`anthropic` is only used by the Claude paths** (ID-card image refinement and the `/extract-data-v2`
+  fax parser). If you never set `ANTHROPIC_API_KEY`, it's imported harmlessly and those paths become
+  a clean no-op / `503` — the core OCR / parsing / payer pipeline has no new dependency.
+- **`pillow`** encodes/downscales images for the vision calls (`llm_image.py`) in addition to its
+  prior use.
 
 ## Setup
 
@@ -238,21 +339,47 @@ To open it from a **phone over your LAN**, you need HTTPS — use a tunnel such 
 reverse proxy with a TLS certificate. For a quick test without a camera, use the **📁 upload**
 button in the UI.
 
+## Configuration
+
+All settings live in `config.py`; the only ones read from the environment are optional:
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `ANTHROPIC_API_KEY` | *(unset)* | Enables the Claude paths (ID-card image refinement + `/extract-data-v2`). Unset = clean no-op / `503`. |
+| `EASYOCR_MODEL_DIR` | `~/.EasyOCR/model` | Where EasyOCR weights live. If present there, startup skips the download/verify handshake. |
+| `OCR_NUM_THREADS` | `0` (torch default) | Optional CPU thread cap for torch. Accuracy-neutral; only affects speed. |
+
+Token/image budgets (`LLM_MAX_TOKENS`, `LLM_IMAGE_MAX_TOKENS`, `FAX_LLM_IMAGE_MAX_TOKENS`,
+`LLM_IMAGE_MAX_DIM`, `FAX_LLM_MAX_PAGES`, …) are plain constants in `config.py` — tune them there.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...     # optional — turns on the Claude paths
+```
+
 ## API
 
-| Method | Path      | Description                                                        |
-|--------|-----------|--------------------------------------------------------------------|
-| GET    | `/`       | Serves the scanner frontend (`index.html`)                         |
-| GET    | `/health` | Health check — returns status and number of indexed payers         |
-| POST   | `/scan`   | Multipart form (`file`) with a card image → structured JSON        |
+| Method | Path               | Description                                                              |
+|--------|--------------------|--------------------------------------------------------------------------|
+| GET    | `/`                | Serves the scanner frontend (`index.html`)                               |
+| GET    | `/health`          | Health check — returns status and number of indexed payers               |
+| POST   | `/scan`            | Multipart form (`file`) with a card image → structured JSON              |
+| POST   | `/extract-data-v1` | Multipart form (`file`, image or PDF) → fax fields via regex + geometry  |
+| POST   | `/extract-data-v2` | Multipart form (`file`, image or PDF) → fax fields via Claude vision (needs `ANTHROPIC_API_KEY`; `503` if unset) |
 
-**`POST /scan` query param:** `min_conf` (float, default `0.4`) — OCR confidence threshold below
+**`POST /scan` query param:** `min_conf` (float, default `0.35`) — OCR confidence threshold below
 which detections are dropped from parsing.
 
 ### Example
 
 ```bash
-curl -X POST "http://127.0.0.1:8000/scan?min_conf=0.4" -F "file=@card.jpg"
+# ID / insurance card
+curl -X POST "http://127.0.0.1:8080/scan?min_conf=0.35" -F "file=@card.jpg"
+
+# Fax (image or PDF) — regex/geometry engine
+curl -X POST "http://127.0.0.1:8080/extract-data-v1" -F "file=@referral_fax.pdf"
+
+# Fax (image or PDF) — Claude vision engine (requires ANTHROPIC_API_KEY)
+curl -X POST "http://127.0.0.1:8080/extract-data-v2" -F "file=@referral_fax.pdf"
 ```
 
 ### Sample response (card found in payers_data.py)
@@ -328,6 +455,43 @@ curl -X POST "http://127.0.0.1:8000/scan?min_conf=0.4" -F "file=@card.jpg"
 > payer-looking `organization` was read and the OCR confidence was high, yet nothing matched the
 > database — so we're fairly (not certainly) confident the card genuinely isn't a known payer.
 
+### Sample fax response (`/extract-data-v2`, Claude vision)
+
+```json
+{
+  "method": "claude",
+  "source": "image",
+  "pages": 3,
+  "fields": {
+    "sender_name": "Preventi.AI",
+    "fax_date": "07/14/2026",
+    "fax_time": "10:32 AM",
+    "website": "preventi.ai",
+    "email": "scaninfo@preventi.ai",
+    "provider_name": "Bilal",
+    "provider_email": "Bilal@yopmail.com",
+    "provider_phone": "+15445634243",
+    "npi": "91528473",
+    "patient_name": "jack",
+    "date_of_birth": "04/04/1999",
+    "patient_phone": "+17869899867",
+    "ct_with_calcium_scoring_and_cardiology_e_consult": true,
+    "ccta_with_cardiology_e_consult": false,
+    "ccta_ai_analysis_with_clearly": false,
+    "recent_creatinine": "0.9",
+    "ldl": "91", "hdl": "60", "total_cholesterol": "135", "triglycerides": "54",
+    "apo_a": "200", "apo_b": "60", "esr": "56", "crp": "100",
+    "support_email": "support@preventi.ai"
+  },
+  "ocr_confidence": []
+}
+```
+
+> Note the checkbox booleans: only `ct_with_calcium_scoring…` is `true` (the box actually ticked on
+> the fax), the other two `false` — the vision engine reads the ticks from the image, which the
+> regex engine (`v1`) cannot. Fields absent from the fax are `null` (omitted above for brevity); the
+> full flat `FAX_FIELDS` set is always present.
+
 ## Response fields
 
 | Field                     | Description                                                            |
@@ -339,7 +503,7 @@ curl -X POST "http://127.0.0.1:8000/scan?min_conf=0.4" -F "file=@card.jpg"
 | `fields.extra_fields`     | Unclassified lines (tier-3 catch-all)                                  |
 | `ocr_confidence`          | Kept detections with their confidence scores                           |
 | `dropped_low_confidence`  | Detections discarded because `conf < min_conf`                         |
-| `refinement`              | LLM refinement status: `skipped` / `not_configured` / `applied` / `failed` (see [Optional LLM refinement](#optional-llm-refinement)) |
+| `refinement`              | LLM refinement status: `skipped` / `not_configured` / `applied` / `applied_image` / `failed` (see [Optional LLM refinement](#optional-llm-refinement)) |
 | `result`                  | Compiled, frontend-ready summary + a confidence % for **all** outcomes — match, partial / alternate-name match, and no-match (see [Compiled result & confidence](#compiled-result--confidence)) |
 
 ## How it works
@@ -352,9 +516,15 @@ curl -X POST "http://127.0.0.1:8000/scan?min_conf=0.4" -F "file=@card.jpg"
 4. Each line is checked against the pre-indexed payer map (exact first, then strict multi-word
    fuzzy); a confident hit adds `payer_id` / `payer_name`.
 5. If (and only if) the heuristic parse looks incomplete **and** `ANTHROPIC_API_KEY` is set, a fast
-   Claude model refines the field assignment from the OCR lines (see
-   [Optional LLM refinement](#optional-llm-refinement)); otherwise this step is skipped entirely.
+   Claude model refines the field assignment — **with the card image attached** so it can read the
+   card directly (see [Optional LLM refinement](#optional-llm-refinement)); otherwise this step is
+   skipped entirely.
 6. The frontend renders the JSON and a green (matched) or amber (no match) payer banner.
+
+Faxes follow a separate flow — see [Fax parsing](#fax-parsing-medical-referral-faxes): the
+**Fax Document** tab POSTs an image/PDF to `/extract-data-v1` (regex + geometry) or
+`/extract-data-v2` (Claude vision, image sent directly), and the results render into
+fax-specific sections.
 
 ## Accuracy tips
 

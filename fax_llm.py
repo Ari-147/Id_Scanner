@@ -1,24 +1,25 @@
 """
-Claude-powered medical-referral-fax parser (token-optimized).
+Claude-powered medical-referral-fax parser (vision).
 
-Targets the exact same flat field set as fax_parser.py so `/extract-data-v1`
-(regex) and `/extract-data-v2` (Claude) return an identical shape.
+`/extract-data-v2` sends the fax page image(s) DIRECTLY to Claude's multimodal
+model — no OCR step. Seeing the real document lets the model read the form
+layout and, crucially, the ORDER-TYPE CHECKBOXES (which text-only OCR can't
+detect), while returning the exact same flat field set as fax_parser.py so v1
+(regex) and v2 (Claude) share one response shape.
 
 Token discipline:
-  - Only the OCR text lines are sent — never the image, never the PDF.
-  - The schema is sent as a terse comma-separated key list (built from
-    FAX_FIELDS), not a verbose JSON template, keeping the system prompt small.
-  - A small/fast model (config.LLM_MODEL, i.e. Haiku) with a bounded
-    max_tokens is used; JSON is the only thing we ask for back.
+  - Page images are downscaled (config.LLM_IMAGE_MAX_DIM) and JPEG-encoded
+    before sending; input tokens scale with pixel area, so this is the main knob.
+  - At most config.FAX_LLM_MAX_PAGES pages are sent.
+  - The schema is a terse comma-separated key list, and output is capped at
+    config.FAX_LLM_IMAGE_MAX_TOKENS.
 """
 import json
 import logging
 import re
 
 import config
-from fax_parser import (
-    FAX_FIELDS, FAX_BOOLEAN_FIELDS, _blank_result, reconstruct_layout,
-)
+from fax_parser import FAX_FIELDS, FAX_BOOLEAN_FIELDS, _blank_result
 
 try:
     from anthropic import Anthropic
@@ -30,21 +31,19 @@ log = logging.getLogger("fax_llm")
 _STRING_FIELDS = [f for f in FAX_FIELDS if f not in FAX_BOOLEAN_FIELDS]
 
 SYSTEM_PROMPT = (
-    "You extract structured data from the OCR text of a medical referral fax. "
-    "The text is a form whose spacing is preserved: a field's LABEL is usually "
-    "on one line and its VALUE is on the line directly below it (or to the right "
-    "in the same column). Lab results are in a two-column grid — match each "
-    "value to the label directly above it in the same column. Ignore the "
-    "repeating page header (From/To/Fax/Page x of y/date-time) except to fill "
-    "the fax metadata fields.\n"
+    "You extract structured data from the image(s) of a medical referral fax. "
+    "Read the form directly from the image. A field's label is next to (usually "
+    "above) its value; lab results are in a two-column grid. Ignore the repeating "
+    "page header (From/To/Fax/Page x of y/date-time) except to fill the fax "
+    "metadata fields.\n"
     "Return ONLY one JSON object, no markdown or commentary.\n"
     "String fields (use null when absent), comma-separated:\n"
     + ", ".join(_STRING_FIELDS) + "\n"
-    "Boolean order-type fields — true only if that option is clearly selected "
-    "(a checkbox tick/X next to it), else false:\n"
+    "Boolean order-type fields — set true ONLY when that option's checkbox is "
+    "actually ticked/filled in the image, otherwise false:\n"
     + ", ".join(sorted(FAX_BOOLEAN_FIELDS)) + "\n"
-    "Copy values verbatim from the text; never invent or reformat data that is "
-    "not present."
+    "Copy values verbatim as printed; never invent or reformat data that is not "
+    "present."
 )
 
 
@@ -76,31 +75,34 @@ def _coerce(llm_fields: dict) -> dict:
     return result
 
 
-def parse_fax_with_llm(detections: list) -> dict:
-    """Extract the canonical fax field set from OCR detections using Claude.
+def parse_fax_with_llm(images: list[bytes]) -> dict:
+    """Extract the canonical fax field set from fax page image(s) using Claude.
 
-    `detections` may be positioned dicts ({"text","conf","x","y"}) or plain
-    strings. Positioned detections are rendered into column-aligned text so the
-    model sees the form's real 2-D layout (labels above values, two-column labs).
-
-    Raises RuntimeError if the LLM is not configured or the call fails — the
-    `/extract-data-v2` endpoint's whole purpose is the LLM, so failures are
-    surfaced rather than silently falling back.
+    `images` is a list of raw image bytes (one per page). Raises RuntimeError if
+    the LLM is not configured or the call fails — the `/extract-data-v2`
+    endpoint's whole purpose is the LLM, so failures are surfaced rather than
+    silently falling back.
     """
     if not is_configured():
         raise RuntimeError(
             "Claude is not configured (set ANTHROPIC_API_KEY and install "
             "the `anthropic` package)."
         )
+    if not images:
+        raise ValueError("No fax pages to parse")
 
-    text = reconstruct_layout(detections)
+    from llm_image import encode_image_block
+
+    pages = images[: config.FAX_LLM_MAX_PAGES]
+    content = [encode_image_block(img) for img in pages]
+    content.append({"type": "text", "text": "Extract the fields as instructed."})
 
     client = Anthropic()
     resp = client.messages.create(
         model=config.LLM_MODEL,
-        max_tokens=config.FAX_LLM_MAX_TOKENS,
+        max_tokens=config.FAX_LLM_IMAGE_MAX_TOKENS,
         system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": text}],
+        messages=[{"role": "user", "content": content}],
     )
     raw = "".join(b.text for b in resp.content if b.type == "text")
     parsed = json.loads(_strip_fences(raw))

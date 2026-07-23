@@ -852,7 +852,7 @@
       document.getElementById('fax-method-claude').classList.toggle('active', method === 'claude');
       document.getElementById('fax-method-hint').innerHTML = method === 'regex'
         ? '<i class="fa-solid fa-bolt text-emerald-400/70"></i> Fast, deterministic pattern matching — no API key required.'
-        : '<i class="fa-solid fa-wand-magic-sparkles text-emerald-400/70"></i> Token-optimized Claude parsing — needs ANTHROPIC_API_KEY on the server.';
+        : '<i class="fa-solid fa-wand-magic-sparkles text-emerald-400/70"></i> Sends the fax image straight to Claude vision (reads checkboxes too) — needs ANTHROPIC_API_KEY on the server.';
     }
 
     function handleFaxUpload(e) {
@@ -955,13 +955,23 @@
         container.appendChild(block);
       });
 
-      // Reuse the shared confidence panel: show average OCR confidence.
+      // Reuse the shared confidence panel.
       const confs = response.ocr_confidence || [];
-      const avg = confs.length ? Math.round(confs.reduce((a, b) => a + b, 0) / confs.length * 100) : 0;
-      document.getElementById('confidence-pct').textContent = avg + '%';
-      document.getElementById('confidence-bar').style.width = avg + '%';
       const confStatus = document.getElementById('confidence-status');
-      confStatus.textContent = confs.length ? `Avg OCR confidence over ${confs.length} lines` : 'No text detected';
+      if (method === 'claude') {
+        // Vision path: no OCR confidence to show.
+        const pages = response.pages || 0;
+        document.getElementById('confidence-pct').textContent = 'AI';
+        document.getElementById('confidence-bar').style.width = '100%';
+        confStatus.textContent = pages
+          ? `Read directly by Claude vision (${pages} page${pages > 1 ? 's' : ''})`
+          : 'Read directly by Claude vision';
+      } else {
+        const avg = confs.length ? Math.round(confs.reduce((a, b) => a + b, 0) / confs.length * 100) : 0;
+        document.getElementById('confidence-pct').textContent = avg + '%';
+        document.getElementById('confidence-bar').style.width = avg + '%';
+        confStatus.textContent = confs.length ? `Avg OCR confidence over ${confs.length} lines` : 'No text detected';
+      }
       confStatus.className = 'text-xs text-slate-400 font-medium';
 
       // Mirror into the raw response panel too.

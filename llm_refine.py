@@ -49,18 +49,35 @@ SCHEMA_FIELDS = (
     "extra_fields",
 )
 
+_SCHEMA_INSTRUCTION = (
+    "Return ONLY a single JSON object with EXACTLY these keys: "
+    "name, id_number, dob, expiry, issue_date, sex, address, organization, "
+    "group_number, dates, extra_fields. Use null for a missing scalar field, "
+    "[] for dates, and {} for extra_fields. No markdown, no code fences, no "
+    "commentary, no extra keys."
+)
+
+# Text-only refinement (no image available).
 SYSTEM_PROMPT = (
     "You are a data-cleaning assistant for an ID / insurance card scanner. "
     "You are given the OCR text lines from a single card (`raw_lines`) and a "
     "heuristic parser's current best-guess `fields`. Your job is to correct or "
     "fill the field assignment using ONLY the literal text present in "
     "`raw_lines`. Never invent, translate, or reformat data that is not present "
-    "in the provided lines.\n\n"
-    "Return ONLY a single JSON object with EXACTLY these keys: "
-    "name, id_number, dob, expiry, issue_date, sex, address, organization, "
-    "group_number, dates, extra_fields. Use null for a missing scalar field, "
-    "[] for dates, and {} for extra_fields. No markdown, no code fences, no "
-    "commentary, no extra keys."
+    "in the provided lines.\n\n" + _SCHEMA_INSTRUCTION
+)
+
+# Refinement WITH the card image attached — the OCR was weak (many empty
+# fields), so let the model read the image as the source of truth and use the
+# OCR lines / current parse only as hints.
+IMAGE_SYSTEM_PROMPT = (
+    "You are a data-cleaning assistant for an ID / insurance card scanner. "
+    "You are given the IMAGE of a single card, plus the OCR text lines "
+    "(`raw_lines`) and a heuristic parser's current best-guess `fields`. The OCR "
+    "was unreliable, so read the values primarily FROM THE IMAGE, using the OCR "
+    "text and current fields only as hints. Copy values exactly as printed; "
+    "never invent or translate data that is not on the card.\n\n"
+    + _SCHEMA_INSTRUCTION
 )
 
 
@@ -110,38 +127,54 @@ def _merge(parsed: dict, llm_fields: dict) -> dict:
     return merged
 
 
-def maybe_refine(raw_lines: list[str], parsed: dict) -> tuple[dict, str]:
+def maybe_refine(
+    raw_lines: list[str], parsed: dict, image_bytes: bytes | None = None
+) -> tuple[dict, str]:
     """
     Optionally refine `parsed` with a Claude call. Returns (fields, status),
-    where status is one of: "not_configured" | "applied" | "failed".
+    where status is one of:
+      "not_configured" | "applied" | "applied_image" | "failed".
 
-    Callers should only invoke this when needs_refinement(parsed) is True.
+    Callers should only invoke this when needs_refinement(parsed) is True — the
+    same threshold therefore gates the (heavier) image send. When `image_bytes`
+    is supplied the card image is attached so the model can read the card
+    directly (larger token budget); otherwise it's the original text-only call.
     """
     # --- Fallback 1: not configured -> clean no-op, nothing scary logged ---
     if not config.ANTHROPIC_API_KEY or Anthropic is None:
         return parsed, "not_configured"
 
     try:
-        # Send ONLY the confident OCR lines and the current best-guess fields
-        # (parser schema keys only — no image, no payer DB, no bbox/conf).
+        # The current best-guess fields (parser schema keys only — no payer DB).
         payload = {
             "raw_lines": raw_lines,
             "fields": {k: parsed.get(k) for k in SCHEMA_FIELDS if k in parsed},
         }
+        payload_text = json.dumps(payload, ensure_ascii=False)
+
+        use_image = image_bytes is not None
+        if use_image:
+            from llm_image import encode_image_block
+            content = [encode_image_block(image_bytes), {"type": "text", "text": payload_text}]
+            system = IMAGE_SYSTEM_PROMPT
+            max_tokens = config.LLM_IMAGE_MAX_TOKENS
+        else:
+            content = payload_text
+            system = SYSTEM_PROMPT
+            max_tokens = config.LLM_MAX_TOKENS
+
         client = Anthropic()  # picks up ANTHROPIC_API_KEY from the environment
         resp = client.messages.create(
             model=config.LLM_MODEL,
-            max_tokens=config.LLM_MAX_TOKENS,
-            system=SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}
-            ],
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": content}],
         )
         text = "".join(b.text for b in resp.content if b.type == "text")
         llm_fields = json.loads(_strip_fences(text))
         if not isinstance(llm_fields, dict):
             raise ValueError("LLM response was not a JSON object")
-        return _merge(parsed, llm_fields), "applied"
+        return _merge(parsed, llm_fields), ("applied_image" if use_image else "applied")
     except Exception as e:  # noqa: BLE001 - any failure must fall back safely
         # Never let an LLM failure break or degrade a scan.
         log.warning("LLM refinement failed (%s); using heuristic result", e)

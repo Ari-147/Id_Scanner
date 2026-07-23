@@ -122,9 +122,11 @@ async def scan(file: UploadFile = File(...), min_conf: float = DEFAULT_MIN_CONF)
             parsed["payer_match"] = None
             logger.info("No payer matched")
 
-        # Optional LLM refinement
+        # Optional LLM refinement. When the heuristic parse is weak (the same
+        # "too many empty fields" threshold as before), attach the card image so
+        # Claude can read it directly rather than trusting the shaky OCR.
         if needs_refinement(parsed):
-            parsed, refinement_status = maybe_refine(clean_lines, parsed)
+            parsed, refinement_status = maybe_refine(clean_lines, parsed, image_bytes=raw)
             logger.info("LLM refinement status: %s", refinement_status)
         else:
             refinement_status = "skipped"
@@ -209,8 +211,10 @@ async def extract_data_v1(file: UploadFile = File(...)):
 
 @app.post("/extract-data-v2")
 async def extract_data_v2(file: UploadFile = File(...)):
-    """Claude-based fax parsing (token-optimized). Requires ANTHROPIC_API_KEY."""
-    logger.info("Fax extract (claude) request: file=%s", file.filename)
+    """Claude vision fax parsing. Sends the fax page image(s) DIRECTLY to Claude
+    (no OCR) so it can read the layout and the order-type checkboxes. Requires
+    ANTHROPIC_API_KEY."""
+    logger.info("Fax extract (claude vision) request: file=%s", file.filename)
     if not fax_llm_configured():
         raise HTTPException(
             503,
@@ -219,14 +223,21 @@ async def extract_data_v2(file: UploadFile = File(...)):
         )
     raw = await file.read()
     try:
-        detections = _ocr_fax(raw, file.content_type)
-        fields = parse_fax_with_llm(detections)
-        logger.info("Fax claude parse done: %d fields populated",
-                    sum(1 for v in fields.values() if v))
+        # A PDF becomes one image per page; anything else is a single image.
+        if file.content_type == "application/pdf":
+            images = convert_pdf_to_images(raw)
+        else:
+            images = [raw]
+
+        fields = parse_fax_with_llm(images)
+        logger.info("Fax claude vision parse done: %d pages, %d fields populated",
+                    len(images), sum(1 for v in fields.values() if v))
         return JSONResponse({
             "method": "claude",
+            "source": "image",       # parsed from the image, not OCR text
+            "pages": len(images),
             "fields": fields,
-            "ocr_confidence": [round(d["conf"], 2) for d in detections],
+            "ocr_confidence": [],     # no OCR step in the vision path
         })
     except HTTPException:
         raise

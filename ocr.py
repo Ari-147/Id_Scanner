@@ -153,4 +153,8 @@ def run_adaptive_ocr(raw: bytes, min_conf: float) -> list[dict]:
     # parser's "label on one line, value on the next" tier to work correctly
     detections.sort(key=lambda d: (d[2], d[3]))
 
-    return [{"text": t, "conf": c} for t, c, _, _ in detections]
+    # `x`/`y` are the normalized (0-1) top-left position of each detection.
+    # The ID-card path ignores them (it only reads "text"); the fax parser uses
+    # them to reconstruct the form's 2-D layout (label above / value below, and
+    # two-column lab grids), which reading order alone gets wrong.
+    return [{"text": t, "conf": c, "y": y, "x": x} for t, c, y, x in detections]

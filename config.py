@@ -21,6 +21,10 @@ LLM_MODEL = "claude-haiku-4-5-20251001"
 # Small: enough for one compact JSON object back.
 LLM_MAX_TOKENS = 300
 
+# A fax has many more fields than an ID card, so its JSON response needs a
+# larger (but still bounded) token budget. See fax_llm.py.
+FAX_LLM_MAX_TOKENS = 1024
+
 # Refinement trigger: call the LLM only when the heuristic parse left more than
 # this many unclassified lines in extra_fields (in addition to the missing
 # name / id_number checks). Keeps token usage near-zero on clean scans.

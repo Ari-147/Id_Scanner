@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-easyocr
+easyocr==1.7.2
 rapidfuzz
 opencv-python-headless
 numpy

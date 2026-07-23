@@ -13,6 +13,8 @@ Run: uvicorn app:app --host 127.0.0.1 --port 8080
 """
 import logging
 import os
+import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
@@ -20,7 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import DEFAULT_MIN_CONF
-from ocr import run_adaptive_ocr
+from ocr import run_adaptive_ocr, get_reader
 from parser import parse_fields
 from payer_matching import match_payer, resolve_payer_candidate, PAYER_CHOICES
 from llm_refine import needs_refinement, maybe_refine
@@ -47,7 +49,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-app = FastAPI(title="ID Card Scanner")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Warm the EasyOCR model at boot so the FIRST request doesn't pay the
+    # multi-second model-load stall (the reader is a per-process singleton).
+    t0 = time.perf_counter()
+    logger.info("Preloading EasyOCR model...")
+    try:
+        get_reader()
+        logger.info("EasyOCR model ready in %.1fs", time.perf_counter() - t0)
+    except Exception as e:  # noqa: BLE001 - fall back to lazy load on first request
+        logger.warning("EasyOCR preload failed (%s); will load on first request", e)
+    yield
+
+
+app = FastAPI(title="ID Card Scanner", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )

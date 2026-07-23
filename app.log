@@ -51,3 +51,11 @@
 2026-07-23 19:49:14,516 [INFO] Fax extract (regex) request: file=Fax_22072026.pdf
 2026-07-23 19:49:20,590 [WARNING] Using CPU. Note: This module is much faster with a GPU.
 2026-07-23 19:54:03,337 [INFO] Fax regex parse done: 32 fields populated
+2026-07-23 21:27:00,671 [INFO] Preloading EasyOCR model...
+2026-07-23 21:27:00,672 [INFO] Loading EasyOCR reader (model_dir=C:\Users\ali14\.EasyOCR\model, models_present=True, download=False)
+2026-07-23 21:27:05,714 [INFO] EasyOCR model ready in 5.0s
+2026-07-23 21:27:37,922 [INFO] Fax extract (regex) request: file=Fax_22072026.pdf
+2026-07-23 21:31:20,761 [INFO] Fax regex parse done: 32 fields populated
+2026-07-23 21:31:20,810 [INFO] Fax extract (claude) request: file=Fax_22072026.pdf
+2026-07-23 21:34:43,936 [INFO] HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2026-07-23 21:34:44,085 [INFO] Fax claude parse done: 33 fields populated

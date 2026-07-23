@@ -37,6 +37,21 @@ REFINE_MAX_EXTRA_FIELDS = 2
 # much more aggressively than a naive "just big enough" target.
 UPSCALE_TARGET = 2200
 
+# --- EasyOCR model loading (startup speed) ---------------------------------
+# Where EasyOCR's model weights live. Defaults to EasyOCR's own cache
+# (~/.EasyOCR/model). When the weights are already present there, the Reader is
+# built with download_enabled=False, which skips the per-start download/verify
+# handshake and just loads the local files — noticeably faster server startup.
+EASYOCR_MODEL_DIR = os.environ.get(
+    "EASYOCR_MODEL_DIR",
+    os.path.join(os.path.expanduser("~"), ".EasyOCR", "model"),
+)
+
+# CPU inference threads for torch. 0 = leave torch's default untouched. Set a
+# value (e.g. your physical core count) only if you want to cap/pin threads;
+# this is accuracy-neutral — it only affects speed/scheduling.
+OCR_NUM_THREADS = int(os.environ.get("OCR_NUM_THREADS", "0"))
+
 # Below this many *confident* lines, a capture is almost certainly a poor photo
 # (blur / low light / too far away) rather than a clean card, so it's worth
 # paying for a second OCR pass with a different preprocessing variant. A clean,

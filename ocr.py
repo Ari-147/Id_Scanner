@@ -8,6 +8,8 @@ a second pass with a different preprocessing variant, and the two are merged.
 The easyocr reader is a lazy singleton and lives here (not in app.py) so that
 run_adaptive_ocr can use it without a circular import back into the app module.
 """
+import logging
+import os
 import re
 
 import numpy as np
@@ -15,19 +17,60 @@ import cv2
 import easyocr
 from fastapi import HTTPException
 
+import config
 from config import UPSCALE_TARGET, MIN_CONFIDENT_LINES_FOR_SINGLE_PASS
 from parser import parse_fields
 
+log = logging.getLogger("ocr")
+
 # ---------------------------------------------------------------------------
-# OCR engine (lazy singleton — first init downloads/loads the CPU model once)
+# OCR engine (lazy singleton — the model is loaded once per process).
+#
+# Call get_reader() once at server startup (see app.py lifespan) to warm this
+# singleton, so no request pays the multi-second model-load stall. When the
+# weights already exist in EASYOCR_MODEL_DIR we build with
+# download_enabled=False, which skips EasyOCR's per-start download/verify
+# handshake and just loads the local files.
 # ---------------------------------------------------------------------------
 _reader = None
+
+# The two weight files EasyOCR needs for an English CPU reader.
+_MODEL_FILES = ("craft_mlt_25k.pth", "english_g2.pth")
+
+
+def _models_present(model_dir: str) -> bool:
+    return all(os.path.isfile(os.path.join(model_dir, f)) for f in _MODEL_FILES)
 
 
 def get_reader():
     global _reader
-    if _reader is None:
-        _reader = easyocr.Reader(["en"], gpu=False)
+    if _reader is not None:
+        return _reader
+
+    # Optional, accuracy-neutral CPU thread cap/pin.
+    if config.OCR_NUM_THREADS and config.OCR_NUM_THREADS > 0:
+        try:
+            import torch
+            torch.set_num_threads(config.OCR_NUM_THREADS)
+        except Exception as e:  # noqa: BLE001 - never let a tuning knob break OCR
+            log.warning("Could not set torch threads: %s", e)
+
+    model_dir = config.EASYOCR_MODEL_DIR
+    have_models = _models_present(model_dir)
+    log.info(
+        "Loading EasyOCR reader (model_dir=%s, models_present=%s, download=%s)",
+        model_dir, have_models, not have_models,
+    )
+    _reader = easyocr.Reader(
+        ["en"],
+        gpu=False,
+        model_storage_directory=model_dir,
+        # Skip the download/verify handshake when weights are already local;
+        # allow a one-time download only if they're missing (first-ever setup).
+        download_enabled=not have_models,
+        quantize=True,        # CPU int8 quantization (EasyOCR default; explicit)
+        verbose=False,
+    )
     return _reader
 
 

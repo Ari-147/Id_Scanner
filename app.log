@@ -48,3 +48,6 @@
 2026-07-23 19:09:44,626 [INFO] Fax extract (regex) request: file=Fax_22072026.pdf
 2026-07-23 19:09:48,683 [WARNING] Using CPU. Note: This module is much faster with a GPU.
 2026-07-23 19:12:42,731 [INFO] Fax regex parse done: 10 fields populated
+2026-07-23 19:49:14,516 [INFO] Fax extract (regex) request: file=Fax_22072026.pdf
+2026-07-23 19:49:20,590 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-23 19:54:03,337 [INFO] Fax regex parse done: 32 fields populated

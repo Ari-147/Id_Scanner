@@ -153,24 +153,31 @@ async def scan(file: UploadFile = File(...), min_conf: float = DEFAULT_MIN_CONF)
 #   { "method": "regex" | "claude", "fields": {...}, "ocr_confidence": [...] }
 # ---------------------------------------------------------------------------
 def _ocr_fax(raw: bytes, content_type: str | None) -> list[dict]:
-    """Run OCR over a fax upload (PDF -> per-page images, else a single image)."""
+    """Run OCR over a fax upload and return positioned detections.
+
+    Each detection is {"text", "conf", "x", "y"} with normalized coordinates.
+    For multi-page PDFs the per-page `y` (0-1) is offset by the page index so a
+    single flat list still preserves global top-to-bottom order across pages —
+    the fax parsers use `x`/`y` to reconstruct the form's 2-D layout.
+    """
     if content_type == "application/pdf":
         detections = []
-        for image in convert_pdf_to_images(raw):
-            detections.extend(run_adaptive_ocr(image, min_conf=DEFAULT_MIN_CONF))
+        for page_index, image in enumerate(convert_pdf_to_images(raw)):
+            for d in run_adaptive_ocr(image, min_conf=DEFAULT_MIN_CONF):
+                d["y"] = d["y"] + page_index  # keep pages from overlapping
+                detections.append(d)
         return detections
     return run_adaptive_ocr(raw, min_conf=DEFAULT_MIN_CONF)
 
 
 @app.post("/extract-data-v1")
 async def extract_data_v1(file: UploadFile = File(...)):
-    """Regex-based fax parsing (zero-cost baseline)."""
+    """Regex/heuristic (layout-aware) fax parsing — zero-cost baseline."""
     logger.info("Fax extract (regex) request: file=%s", file.filename)
     raw = await file.read()
     try:
         detections = _ocr_fax(raw, file.content_type)
-        lines = [d["text"] for d in detections]
-        fields = parser_fax_with_regex(lines)
+        fields = parser_fax_with_regex(detections)
         logger.info("Fax regex parse done: %d fields populated",
                     sum(1 for v in fields.values() if v))
         return JSONResponse({
@@ -197,8 +204,7 @@ async def extract_data_v2(file: UploadFile = File(...)):
     raw = await file.read()
     try:
         detections = _ocr_fax(raw, file.content_type)
-        lines = [d["text"] for d in detections]
-        fields = parse_fax_with_llm(lines)
+        fields = parse_fax_with_llm(detections)
         logger.info("Fax claude parse done: %d fields populated",
                     sum(1 for v in fields.values() if v))
         return JSONResponse({

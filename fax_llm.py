@@ -16,7 +16,9 @@ import logging
 import re
 
 import config
-from fax_parser import FAX_FIELDS, FAX_BOOLEAN_FIELDS, _blank_result
+from fax_parser import (
+    FAX_FIELDS, FAX_BOOLEAN_FIELDS, _blank_result, reconstruct_layout,
+)
 
 try:
     from anthropic import Anthropic
@@ -29,10 +31,17 @@ _STRING_FIELDS = [f for f in FAX_FIELDS if f not in FAX_BOOLEAN_FIELDS]
 
 SYSTEM_PROMPT = (
     "You extract structured data from the OCR text of a medical referral fax. "
+    "The text is a form whose spacing is preserved: a field's LABEL is usually "
+    "on one line and its VALUE is on the line directly below it (or to the right "
+    "in the same column). Lab results are in a two-column grid — match each "
+    "value to the label directly above it in the same column. Ignore the "
+    "repeating page header (From/To/Fax/Page x of y/date-time) except to fill "
+    "the fax metadata fields.\n"
     "Return ONLY one JSON object, no markdown or commentary.\n"
     "String fields (use null when absent), comma-separated:\n"
     + ", ".join(_STRING_FIELDS) + "\n"
-    "Boolean fields (true only if that order type is clearly present, else false):\n"
+    "Boolean order-type fields — true only if that option is clearly selected "
+    "(a checkbox tick/X next to it), else false:\n"
     + ", ".join(sorted(FAX_BOOLEAN_FIELDS)) + "\n"
     "Copy values verbatim from the text; never invent or reformat data that is "
     "not present."
@@ -67,8 +76,12 @@ def _coerce(llm_fields: dict) -> dict:
     return result
 
 
-def parse_fax_with_llm(ocr_lines: list[str]) -> dict:
-    """Extract the canonical fax field set from OCR lines using Claude.
+def parse_fax_with_llm(detections: list) -> dict:
+    """Extract the canonical fax field set from OCR detections using Claude.
+
+    `detections` may be positioned dicts ({"text","conf","x","y"}) or plain
+    strings. Positioned detections are rendered into column-aligned text so the
+    model sees the form's real 2-D layout (labels above values, two-column labs).
 
     Raises RuntimeError if the LLM is not configured or the call fails — the
     `/extract-data-v2` endpoint's whole purpose is the LLM, so failures are
@@ -80,8 +93,7 @@ def parse_fax_with_llm(ocr_lines: list[str]) -> dict:
             "the `anthropic` package)."
         )
 
-    # Drop blank lines to trim input tokens.
-    text = "\n".join(l for l in ocr_lines if l and l.strip())
+    text = reconstruct_layout(detections)
 
     client = Anthropic()
     resp = client.messages.create(

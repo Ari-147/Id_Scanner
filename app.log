@@ -37,3 +37,14 @@
 2026-07-22 18:47:50,663 [INFO] Payer matched: Centene (ID 68069, score 100.0)
 2026-07-22 18:47:50,663 [INFO] LLM refinement status: not_configured
 2026-07-22 18:47:50,673 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-22 21:23:07,880 [INFO] Scan request received: file=3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg, min_conf=0.35
+2026-07-22 21:24:56,888 [INFO] OCR completed: 53 detections (before confidence filter)
+2026-07-22 21:24:56,895 [INFO] Kept 32 lines after confidence filter
+2026-07-22 21:24:56,920 [INFO] Parsed fields: {'id_number': 'R261-00164 948 0', 'name': 'Aniberka Reyes Rivas', 'organization': 'Clarity Silver', 'issue_date': '01/01/2026', 'group_number': 'coST SHARES'}
+2026-07-22 21:24:56,992 [INFO] Payer matched: Centene (ID 68069, score 100.0)
+2026-07-22 21:24:56,994 [INFO] LLM refinement status: not_configured
+2026-07-22 21:24:56,997 [INFO] Scan completed successfully for 3d82747d-3cbd-079d-67fb-4d914a016c3d.jpeg
+2026-07-23 18:47:13,222 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-23 19:09:44,626 [INFO] Fax extract (regex) request: file=Fax_22072026.pdf
+2026-07-23 19:09:48,683 [WARNING] Using CPU. Note: This module is much faster with a GPU.
+2026-07-23 19:12:42,731 [INFO] Fax regex parse done: 10 fields populated

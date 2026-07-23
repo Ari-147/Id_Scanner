@@ -15,7 +15,7 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,6 +25,9 @@ from parser import parse_fields
 from payer_matching import match_payer, resolve_payer_candidate, PAYER_CHOICES
 from llm_refine import needs_refinement, maybe_refine
 from result_summary import build_result_summary
+from fax_parser import parser_fax_with_regex
+from fax_llm import parse_fax_with_llm, is_configured as fax_llm_configured
+from pdf_converter import convert_pdf_to_images
 
 # ---------------------------------------------------------------------------
 # Logging setup
@@ -141,6 +144,75 @@ async def scan(file: UploadFile = File(...), min_conf: float = DEFAULT_MIN_CONF)
 #             print("Session Ended/ Removed log File")
 #         except Exception as e:
 #                 print(f"Error removing log file: {e}")
+
+# ---------------------------------------------------------------------------
+# Fax parsing
+#
+# Two endpoints, one shared OCR front-end. Both accept an image OR a PDF and
+# return the SAME response shape so the frontend can render either identically:
+#   { "method": "regex" | "claude", "fields": {...}, "ocr_confidence": [...] }
+# ---------------------------------------------------------------------------
+def _ocr_fax(raw: bytes, content_type: str | None) -> list[dict]:
+    """Run OCR over a fax upload (PDF -> per-page images, else a single image)."""
+    if content_type == "application/pdf":
+        detections = []
+        for image in convert_pdf_to_images(raw):
+            detections.extend(run_adaptive_ocr(image, min_conf=DEFAULT_MIN_CONF))
+        return detections
+    return run_adaptive_ocr(raw, min_conf=DEFAULT_MIN_CONF)
+
+
+@app.post("/extract-data-v1")
+async def extract_data_v1(file: UploadFile = File(...)):
+    """Regex-based fax parsing (zero-cost baseline)."""
+    logger.info("Fax extract (regex) request: file=%s", file.filename)
+    raw = await file.read()
+    try:
+        detections = _ocr_fax(raw, file.content_type)
+        lines = [d["text"] for d in detections]
+        fields = parser_fax_with_regex(lines)
+        logger.info("Fax regex parse done: %d fields populated",
+                    sum(1 for v in fields.values() if v))
+        return JSONResponse({
+            "method": "regex",
+            "fields": fields,
+            "ocr_confidence": [round(d["conf"], 2) for d in detections],
+        })
+    except Exception as e:
+        logger.error("Fax regex extract failed for %s: %s", file.filename, e,
+                     exc_info=True)
+        raise
+
+
+@app.post("/extract-data-v2")
+async def extract_data_v2(file: UploadFile = File(...)):
+    """Claude-based fax parsing (token-optimized). Requires ANTHROPIC_API_KEY."""
+    logger.info("Fax extract (claude) request: file=%s", file.filename)
+    if not fax_llm_configured():
+        raise HTTPException(
+            503,
+            "Claude fax parsing is not configured. Set ANTHROPIC_API_KEY (and "
+            "install the `anthropic` package), or use the regex parser instead.",
+        )
+    raw = await file.read()
+    try:
+        detections = _ocr_fax(raw, file.content_type)
+        lines = [d["text"] for d in detections]
+        fields = parse_fax_with_llm(lines)
+        logger.info("Fax claude parse done: %d fields populated",
+                    sum(1 for v in fields.values() if v))
+        return JSONResponse({
+            "method": "claude",
+            "fields": fields,
+            "ocr_confidence": [round(d["conf"], 2) for d in detections],
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Fax claude extract failed for %s: %s", file.filename, e,
+                     exc_info=True)
+        raise HTTPException(502, f"Claude fax parsing failed: {e}")
+
 
 if __name__ == "__main__":
     import uvicorn
